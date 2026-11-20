@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TruePitch</title>
+<style>
+:root{--bg:#f7f8fa;--card:#fff;--tx:#1b1f24;--mut:#667085;--bd:#dfe3e8;--ac:#3b6fd4;--ok:#1a7f4b;--warn:#b54708;--bad:#b42318}
+@media (prefers-color-scheme:dark){:root{--bg:#14171b;--card:#1d2127;--tx:#e8eaed;--mut:#9aa3ad;--bd:#303741;--ac:#7aa2f7;--ok:#4cc38a;--warn:#f0a35e;--bad:#f07178}}
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,Segoe UI,sans-serif;background:var(--bg);color:var(--tx)}
+header{display:flex;gap:16px;align-items:center;padding:12px 20px;border-bottom:1px solid var(--bd);background:var(--card);flex-wrap:wrap}
+h1{font-size:18px;margin:0}nav button{background:none;border:0;color:var(--mut);font:inherit;padding:6px 10px;cursor:pointer;border-radius:6px}
+nav button.on{background:var(--ac);color:#fff}main{max-width:1000px;margin:20px auto;padding:0 16px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:16px;margin-bottom:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}.big{font-size:26px;font-weight:600}
+.mut{color:var(--mut);font-size:13px}table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:6px 8px;border-bottom:1px solid var(--bd);text-align:left}
+textarea,input[type=file]{width:100%;padding:8px;border:1px solid var(--bd);border-radius:6px;background:var(--bg);color:var(--tx);font:inherit}
+button.go{background:var(--ac);color:#fff;border:0;padding:9px 18px;border-radius:6px;font:inherit;cursor:pointer}button.go:disabled{opacity:.5}
+.bar{height:10px;background:var(--bd);border-radius:5px;overflow:hidden}.bar>i{display:block;height:100%;background:var(--ac)}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:12px;border:1px solid var(--bd);margin-right:6px}
+.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}canvas{width:100%;height:120px;background:var(--bg);border:1px solid var(--bd);border-radius:6px}
+pre{white-space:pre-wrap;font-size:12px;overflow-x:auto}img{max-width:100%}.hide{display:none}ul{margin:4px 0 4px 18px;padding:0}
+</style></head><body>
+<header><h1>TruePitch</h1><span class="mut">Multimodal sarcasm detection: text + speech prosody</span>
+<nav id="nav"></nav></header>
+<main>
+<section id="dash"></section>
+<section id="detect" class="hide">
+ <div class="card"><b>Detect sarcasm</b>
+  <p class="mut">Provide a sentence, an audio clip (about 5 s, one utterance), or both. If one is missing, a single-modality model is used and this is stated in the result.</p>
+  <textarea id="txt" rows="3" maxlength="1000" placeholder="e.g. Wonderful, another meeting."></textarea>
+  <p><input type="file" id="aud" accept="audio/*"></p>
+  <label><input type="checkbox" id="wh"> If no sentence is given, transcribe the audio with Whisper (slower; may contain errors)</label><br><br>
+  <button class="go" id="run">Run inference</button> <span id="busy" class="mut"></span></div>
+ <div id="out"></div>
+ <div class="card"><b>Recent predictions</b><div id="hist" class="mut">none yet</div></div>
+</section>
+<section id="audio" class="hide"><div class="card"><b>Audio analysis</b>
+ <p><input type="file" id="aud2" accept="audio/*"></p><button class="go" id="an">Analyze</button> <span id="busy2" class="mut"></span></div><div id="anout"></div></section>
+<section id="models" class="hide"></section>
+<section id="exps" class="hide"></section>
+</main>
+<script>
+const $=id=>document.getElementById(id), esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const tabs={dash:'Dashboard',detect:'Detect',audio:'Audio analysis',models:'Model comparison',exps:'Experiments'};
+$('nav').innerHTML=Object.entries(tabs).map(([k,v])=>`<button data-t="${k}">${v}</button>`).join('');
+function show(t){for(const k in tabs){$(k).classList.toggle('hide',k!==t)};document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));
+ ({dash:loadDash,models:loadModels,exps:loadExps,detect:loadHist})[t]?.()}
+$('nav').onclick=e=>e.target.dataset.t&&show(e.target.dataset.t);
+const J=async(u,o)=>{const r=await fetch(u,o);const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.detail||r.statusText);return j};
+const f3=x=>x==null?'n/a':Number(x).toFixed(3);
+function bars(rows){return `<table><tr><th>ID</th><th>Model</th><th>Pooled macro-F1</th><th></th></tr>`+rows.map(r=>r.status==='TRAINED'?
+ `<tr><td>${r.id}</td><td>${esc(r.title)}</td><td>${f3(r.pooled_macro_f1)}</td><td style="width:30%"><div class="bar"><i style="width:${r.pooled_macro_f1*100}%"></i></div></td></tr>`:
+ `<tr><td>${r.id}</td><td>${esc(r.title)}</td><td class="warn">NOT RUN</td><td></td></tr>`).join('')+'</table>'}
+async function loadDash(){const s=await J('/api/status'),e=await J('/api/experiments');const fm=s.final_models||{};
+ const sel=s.final_meta?.cv_metrics?.multimodal;
+ $('dash').innerHTML=`<div class="grid">
+ <div class="card"><div class="mut">Selected model (app)</div><div class="big">Attention fusion + mismatch</div><div class="mut">E6, primary research model${sel?` · CV macro-F1 ${f3(sel.macro_f1)}`:''}</div></div>
+ <div class="card"><div class="mut">Final models trained</div><div class="big">${Object.keys(fm).length?Object.values(fm).reduce((a,b)=>a+b,0):0}</div><div class="mut">${Object.entries(fm).map(([k,v])=>k+': '+v+' seeds').join(' · ')||'none: run scripts/train_final.py'}</div></div>
+ <div class="card"><div class="mut">Experiments trained</div><div class="big">${s.experiments_trained}/${s.experiments_total}</div></div>
+ <div class="card"><div class="mut">Dataset (MUStARD)</div><div class="big">${s.dataset.n_samples??'?'}</div><div class="mut">${s.dataset.audio_files} audio files · ${s.dataset.features_cached.length} cached feature sets · annotations ${s.dataset.annotations_found?'found':'<span class=bad>missing</span>'}</div></div></div>
+ <div class="card"><b>Experiment comparison</b> <span class="mut">(speaker-independent cross-validation; test predictions only)</span>${bars(e)}
+ <p class="mut">Final app models have no held-out test set; their expected performance is the cross-validated figure of the same recipe. E0 is a content-free control (clip length, loudness, word count).</p></div>`}
+async function loadModels(){const e=await J('/api/experiments');const want=['E1','E2','E3','E4','E5','E7','E6'];const rows=e.filter(r=>want.includes(r.id));
+ $('models').innerHTML=`<div class="card"><b>Model comparison</b><p class="mut">Actual trained-model metrics only. Untrained entries are marked NOT RUN.</p><table><tr><th>ID</th><th>Model</th><th>Pooled F1</th><th>Fold mean ± std</th><th>Acc</th><th>FPR</th><th>FNR</th></tr>`+
+ rows.map(r=>r.status==='TRAINED'?`<tr><td>${r.id}</td><td>${esc(r.title)}</td><td>${f3(r.pooled_macro_f1)}</td><td>${f3(r.fold_mean_macro_f1)} ± ${f3(r.fold_std)}</td><td>${f3(r.accuracy)}</td><td>${f3(r.fpr)}</td><td>${f3(r.fnr)}</td></tr>`:`<tr><td>${r.id}</td><td>${esc(r.title)}</td><td colspan=5 class="warn">NOT RUN</td></tr>`).join('')+'</table></div>'}
+async function loadExps(){const [e,r]=await Promise.all([J('/api/experiments'),J('/api/results')]);
+ $('exps').innerHTML=e.map(x=>`<div class="card"><b>${x.id}</b> ${esc(x.title)} <span class="badge ${x.status==='TRAINED'?'ok':'warn'}">${x.status}</span>`+(x.status==='TRAINED'?
+ `<div class="mut">kind ${x.config.kind} · seeds ${JSON.stringify(x.config.seeds)} · split ${x.config.split_hash} · ${x.checkpoints} checkpoints · ${x.config.runtime_s}s on ${x.config.device}</div>
+ <details><summary class="mut">hyperparameters</summary><pre>${esc(JSON.stringify(x.config.hyperparameters,null,1))}</pre></details>`:'')+'</div>').join('')+
+ (r.figures.length?`<div class="card"><b>Figures</b>${r.figures.map(f=>`<p><img src="${f}"></p>`).join('')}</div>`:'')+
+ (r.markdown?`<div class="card"><b>Full results (results.md)</b><pre>${esc(r.markdown)}</pre></div>`:'')}
+function draw(cv,ys,color,fixedMax){const c=cv.getContext('2d'),W=cv.width=cv.clientWidth*2,H=cv.height=cv.clientHeight*2;c.clearRect(0,0,W,H);
+ const v=ys.filter(y=>y!=null);if(!v.length){c.fillStyle='#888';c.fillText('no data',10,20);return}
+ const mx=fixedMax||Math.max(...v),mn=fixedMax?0:Math.min(...v);c.strokeStyle=color;c.lineWidth=2;c.beginPath();let pen=false;
+ ys.forEach((y,i)=>{if(y==null){pen=false;return}const x=i/(ys.length-1)*W,yy=H-6-(y-mn)/(mx-mn||1)*(H-12);pen?c.lineTo(x,yy):c.moveTo(x,yy);pen=true});c.stroke()}
+function showAnalysis(el,a){const ft=Object.entries(a.features).map(([k,v])=>`<tr><td>${esc(k)}</td><td>${v??'n/a'}</td></tr>`).join('');
+ el.innerHTML=`<div class="card"><b>Audio analysis</b> <span class="mut">${a.duration_s}s</span>
+ ${a.pitch_warning?`<p class="warn">⚠ ${esc(a.pitch_warning)}</p>`:''}<p class="mut">Waveform</p><canvas id="c1"></canvas><p class="mut">Pitch contour (Hz; gaps = unvoiced; tracker: ${a.pitch_tracker})</p><canvas id="c2"></canvas><p class="mut">Energy (RMS)</p><canvas id="c3"></canvas>
+ <p class="mut">Prosodic summaries (pitch from pYIN; energy-based pause/speech values are heuristics)</p><table>${ft}</table></div>`;
+ const cs=getComputedStyle(document.body),ac=cs.getPropertyValue('--ac');
+ const w=document.getElementById('c1');draw(w,a.waveform,ac,Math.max(...a.waveform));draw(document.getElementById('c2'),a.f0_hz,ac);draw(document.getElementById('c3'),a.rms,ac)}
+$('an').onclick=async()=>{const f=$('aud2').files[0];if(!f)return $('busy2').textContent='Choose an audio file.';$('busy2').textContent='Analyzing…';
+ const fd=new FormData();fd.append('audio',f);try{showAnalysis($('anout'),await J('/api/analyze_audio',{method:'POST',body:fd}));$('busy2').textContent=''}catch(e){$('busy2').textContent='';$('anout').innerHTML=`<div class="card bad">${esc(e.message)}</div>`}};
+$('run').onclick=async()=>{const t=$('txt').value.trim(),f=$('aud').files[0];if(!t&&!f)return $('busy').textContent='Enter a sentence and/or choose an audio file.';
+ $('run').disabled=true;$('busy').textContent='Running (the first run loads the models and can take a minute)…';const fd=new FormData();
+ if(t)fd.append('text',t);if(f)fd.append('audio',f);fd.append('use_whisper',$('wh').checked);$('out').innerHTML='';
+ try{const r=await J('/api/predict',{method:'POST',body:fd});renderPred(r);if(f){const fa=new FormData();fa.append('audio',f);
+   const d=document.createElement('div');$('out').appendChild(d);J('/api/analyze_audio',{method:'POST',body:fa}).then(a=>showAnalysis(d,a)).catch(()=>{})}loadHist()}
+ catch(e){$('out').innerHTML=`<div class="card bad">${esc(e.message)}</div>`}$('run').disabled=false;$('busy').textContent=''};
+function renderPred(r){const li=a=>a.length?`<ul>${a.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:'<div class="mut">not available</div>';const x=r.explanation,s=r.scores;
+ $('out').innerHTML=`<div class="card"><div class="mut">Prediction</div><div class="big ${r.label==='sarcastic'?'warn':'ok'}">${r.label}</div>
+ <div class="bar"><i style="width:${r.p_sarcastic*100}%"></i></div><div class="mut">P(sarcastic) ${f3(r.p_sarcastic)} · confidence ${f3(r.confidence)} · spread across ${r.model.n_ensemble} seeds ±${f3(r.seed_std)}</div><p>
+ <span class="badge">text: ${r.modality.text}</span><span class="badge">audio: ${r.modality.audio}</span><span class="badge">model: ${r.model.name}${r.model.cv_experiment?' ('+r.model.cv_experiment+')':''}</span></p>
+ ${r.warnings.map(w=>`<div class="warn">⚠ ${esc(w)}</div>`).join('')}
+ ${r.transcript?`<div class="mut">Transcript (${esc(r.transcript.source)}): “${esc(r.transcript.text)}”</div>`:''}</div>
+ <div class="card"><b>Scores</b><table><tr><td>Text sentiment (−1…+1)</td><td>${f3(s.text_sentiment)}</td></tr><tr><td>Acoustic valence (calibrated)</td><td>${f3(s.acoustic_valence_calibrated)}</td></tr><tr><td>Mismatch |s_t − s_a|</td><td>${s.mismatch==null?'n/a (needs both modalities)':f3(s.mismatch)}</td></tr></table></div>
+ <div class="card"><b>Explanation</b> <span class="mut">(descriptive signals, not causal)</span><p><b>Textual evidence</b>${li(x.textual)}<b>Acoustic evidence</b>${li(x.acoustic)}<b>Cross-modal</b>${li(x.cross_modal.concat(x.model))}<b>Caveats</b>${li(x.caveats)}</p></div>`}
+async function loadHist(){try{const h=await J('/api/history');$('hist').innerHTML=h.length?`<table>${h.map(r=>`<tr><td>${r.ts}</td><td>${r.model}</td><td>${r.label} (${f3(r.p_sarcastic)})</td><td>${esc(r.text)}</td></tr>`).join('')}</table>`:'none yet'}catch(e){}}
+show('dash');
+</script></body></html>

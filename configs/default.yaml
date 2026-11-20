@@ -1,0 +1,21 @@
+seed: 42
+paths:
+  data_root: data
+  mustard_annotations: data/mustard/sarcasm_data.json
+  mustard_video_dir: data/mustard/videos      # CONFIRM actual layout after download
+  audio_dir: data/audio16k                    # produced by preprocessing (Phase 2)
+  cache_dir: cache
+  output_dir: outputs
+splits:
+  n_folds: 5            # outer speaker-grouped folds (test)
+  val_folds: 5          # inner split => ~20% of train+val speakers' samples go to validation
+  seed: 42
+audio:
+  sample_rate: 16000
+  mono: true
+text:
+  primary_encoder: roberta-base
+  alt_encoder: bert-base-uncased
+speech:
+  ssl_encoder: facebook/wav2vec2-base
+  handcrafted: eGeMAPSv02

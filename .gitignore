@@ -1,0 +1,28 @@
+# Datasets, caches, checkpoints, experiment outputs: never commit
+data/
+cache/
+outputs/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.wav
+*.mp4
+*.npy
+*.npz
+*.sqlite
+*.db
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ipynb_checkpoints/
+# Frontend
+node_modules/
+dist/
+# OS / IDE
+.DS_Store
+.vscode/
+.idea/

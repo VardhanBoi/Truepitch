@@ -1,0 +1,20 @@
+# Install torch first (CPU): pip install torch --index-url https://download.pytorch.org/whl/cpu
+torch
+transformers
+scikit-learn
+numpy
+pandas
+matplotlib
+joblib
+pyyaml
+librosa
+soundfile
+opensmile
+praat-parselmouth
+# Backend (later phase)
+fastapi
+uvicorn[standard]
+pydantic
+python-multipart
+pytest
+httpx
